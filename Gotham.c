@@ -10,45 +10,7 @@
 #include <string.h>
 #include "Common.h"
 
-typedef struct{
-    char* fleckIpAddress;
-    int fleckPort;
-    char* harleyEnigmaIpAddress;
-    int harleyEnigmaPort;
-} Gotham;
 
-Gotham *readConfigFile(char *file) {
-    char* buffer;
-    Gotham *gotham;
-
-    int fd = open(file, O_RDONLY);
-    if (fd < 0) {
-        printF("Error: File not found\n");
-    } else {
-        
-        gotham = (Gotham *)malloc(sizeof(Gotham));
-
-        gotham->fleckIpAddress = readUntil(fd, '\n');
-        
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            gotham->fleckPort = atoi(buffer); 
-            free(buffer);
-        }
-        
-        gotham->harleyEnigmaIpAddress = readUntil(fd, '\n');
-
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            gotham->harleyEnigmaPort = atoi(buffer);
-            free(buffer);
-        }
-
-        close(fd);
-    }
-
-    return gotham;
-}
 
 int main(int argc, char *argv[])
 {
@@ -57,9 +19,9 @@ int main(int argc, char *argv[])
         printF("Error you need to give a configuration file");
         return -1;
     }
-    Gotham *gotham = NULL;
-
-    gotham = readConfigFile(argv[1]);
+    
+    Gotham* gotham = (Gotham*)readConfigFile(argv[1], "Gotham");
+    
     if (gotham == NULL)
     {
         printF("GOTHAM NULL");

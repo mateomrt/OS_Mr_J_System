@@ -10,52 +10,6 @@
 #include <string.h>
 #include "Common.h"
 
-
-typedef struct{
-    char* gothamIpAddress;
-    int gothamPort;
-    char* fleckIpAddress;
-    int fleckPort;
-    char* folderName;
-    char* workerType;
-} Enigma;
-
-Enigma *readConfigFile(char *file) {
-    char* buffer;
-    Enigma *enigma;
-
-    int fd = open(file, O_RDONLY);
-    if (fd < 0) {
-        printf("Error: File not found\n");
-    } else {
-        
-        enigma = (Enigma *)malloc(sizeof(Enigma));
-
-        enigma->gothamIpAddress = readUntil(fd, '\n');
-        
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            enigma->gothamPort = atoi(buffer); 
-            free(buffer);
-        }
-        
-        enigma->fleckIpAddress = readUntil(fd, '\n');
-
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            enigma->fleckPort = atoi(buffer); 
-            free(buffer);
-        }
-
-        enigma->folderName = readUntil(fd, '\n');
-        enigma->workerType = readUntil(fd, '\n');
-
-        close(fd);
-    }
-
-    return enigma;
-}
-
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -63,9 +17,8 @@ int main(int argc, char *argv[])
         printF("Error you need to give a configuration file");
         return -1;
     }
-    Enigma *enigma = NULL;
-
-    enigma = readConfigFile(argv[1]);
+    
+    Enigma* enigma = (Enigma*)readConfigFile(argv[1], "Enigma");
 
     if (enigma == NULL)
     {

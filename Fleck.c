@@ -13,43 +13,11 @@
 #include <dirent.h>
 #include "Common.h"
 
-
-typedef struct{
-    char* name;
-    char* userFile;
-    char* ipAddress;
-    int port;
-} User;
-
 typedef enum {
     FILE_TYPE_TEXT,
     FILE_TYPE_MEDIA
 } FileType;
 
-User *readConfigFile(char *file) {
-    char* buffer;
-    User *user;
-
-    int fd = open(file, O_RDONLY);
-    if (fd < 0) {
-        printf("Error: File not found\n");
-    } else {
-        
-        user = (User *)malloc(sizeof(User));
-
-        user->name = readUntil(fd, '\n');
-        user->userFile = readUntil(fd, '\n');
-        user->ipAddress = readUntil(fd, '\n');
-
-        buffer = readUntil(fd, '\n');
-        user->port = atoi(buffer);
-        free(buffer);
-
-        close(fd);
-    }
-
-    return user;
-}
 
 bool isFileOfType(const char* filename, FileType type) {
     const char* ext = strrchr(filename, '.');
@@ -173,9 +141,9 @@ int main(int argc, char *argv[])
         printF("Error you need to give a configuration file");
         return -1;
     }
-    User *user = NULL;
+    
+    User* user = (User*)readConfigFile(argv[1], "User");
 
-    user = readConfigFile(argv[1]);
     if (user == NULL)
     {
         printF("USER NULL");

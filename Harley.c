@@ -11,52 +11,6 @@
 #include "Common.h"
 
 
-typedef struct{
-    char* gothamIpAddress;
-    int gothamPort;
-    char* fleckIpAddress;
-    int fleckPort;
-    char* folderName;
-    char* workerType;
-} Harley;
-
-Harley *readConfigFile(char *file) {
-    char* buffer;
-    Harley *harley;
-
-    int fd = open(file, O_RDONLY);
-    if (fd < 0) {
-        printf("Error: File not found\n");
-    } else {
-        
-        harley = (Harley *)malloc(sizeof(Harley));
-
-        
-        harley->gothamIpAddress = readUntil(fd, '\n');
-        
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            harley->gothamPort = atoi(buffer); 
-            free(buffer);
-        }
-        
-        harley->fleckIpAddress = readUntil(fd, '\n');
-
-        buffer = readUntil(fd, '\n');
-        if (buffer != NULL) {
-            harley->fleckPort = atoi(buffer);
-            free(buffer);
-        }
-
-        harley->folderName = readUntil(fd, '\n');
-        harley->workerType = readUntil(fd, '\n');
-
-        close(fd);
-    }
-
-    return harley;
-}
-
 int main(int argc, char *argv[])
 {
     if (argc != 2)
@@ -64,10 +18,9 @@ int main(int argc, char *argv[])
         printF("Error you need to give a configuration file");
         return -1;
     }
-    Harley *harley = NULL;
-
-    harley = readConfigFile(argv[1]);
-
+    
+    Harley* harley = (Harley*)readConfigFile(argv[1], "Harley");
+    
     if (harley == NULL)
     {
         printF("HARLEY NULL");
@@ -75,7 +28,7 @@ int main(int argc, char *argv[])
     }
 
     if (strcmp(harley->workerType, "Media") != 0 && strcmp(harley->workerType, "Text") != 0) {
-        printf("Error: Invalid worker type\n");
+        printF("Error: Invalid worker type\n");
         return -3;
     }
 
