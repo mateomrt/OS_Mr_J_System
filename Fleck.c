@@ -1,6 +1,7 @@
 /*
 @author: Matéo Martin
 */
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +11,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <dirent.h>
-#include "Strings.h"
+#include "Common.h"
 
 
 typedef struct{
