@@ -11,6 +11,8 @@
 #include <string.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <arpa/inet.h>
+#include "Protocol.h"
 #include "Common.h"
 
 typedef enum {
@@ -18,6 +20,33 @@ typedef enum {
     FILE_TYPE_MEDIA
 } FileType;
 
+//--------------- CLIENT/SERVER SIDE --------------------------
+void sendConnectionRequest(int sockfd, const char *username, const char *ip, int port) {
+    Frame frame = {0};
+    frame.type = 0x01;
+    frame.timestamp = time(NULL);
+    snprintf(frame.data, sizeof(frame.data), "%s&%s&%d", username, ip, port);
+    frame.dataLength = strlen(frame.data);
+    frame.checksum = calculateChecksum(&frame);
+
+    uint8_t buffer[FRAME_SIZE];
+    serializeFrame(&frame, buffer);
+    write(sockfd, buffer, FRAME_SIZE);
+}
+
+void handleServerResponse(int sockfd) {
+    uint8_t buffer[FRAME_SIZE];
+    read(sockfd, buffer, FRAME_SIZE);
+
+    Frame response;
+    deserializeFrame(buffer, &response);
+
+    if (response.type == 0x01 && response.dataLength == 0) {
+        printf("Connection OK\n");
+    } else if (response.type == 0x01) {
+        printf("Connection failed: %s\n", response.data);
+    }
+}
 
 bool isFileOfType(const char* filename, FileType type) {
     const char* ext = strrchr(filename, '.');
@@ -150,7 +179,30 @@ int main(int argc, char *argv[])
         return -2;
     }
 
-    handleCommands(user);
+    //handleCommands(user);
+
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("Socket creation failed");
+        return -1;
+    }
+
+    struct sockaddr_in serverAddr = {0};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(user->port);
+    serverAddr.sin_addr.s_addr = inet_addr(user->ipAddress);
+    inet_pton(AF_INET, user->ipAddress, &serverAddr.sin_addr);
+
+    if (connect(sockfd, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
+        perror("Connection to server failed");
+        close(sockfd);
+        return -1;
+    }
+
+    sendConnectionRequest(sockfd, user->name, user->ipAddress, user->port);
+    handleServerResponse(sockfd);
+
+    close(sockfd);
 
     free(user);
     return 0;

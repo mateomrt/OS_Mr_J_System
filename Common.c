@@ -101,5 +101,5 @@ void* readConfigFile(char *file, void *config) {
     }
 
     close(fd);
-    return config;
+    return NULL;
 }
