@@ -76,8 +76,8 @@ void* readConfigFile(char *file, void *config) {
         enigma->workerType = readUntil(fd, '\n');
         close(fd);
         return enigma;
-    } else if (strcmp(config, "User") == 0) {
-        User *user = (User*)malloc(sizeof(User));
+    } else if (strcmp(config, "Fleck") == 0) {
+        Fleck *user = (Fleck*)malloc(sizeof(Fleck));
         user->name = readUntil(fd, '\n');
         user->userFile = readUntil(fd, '\n');
         user->ipAddress = readUntil(fd, '\n');

@@ -17,7 +17,7 @@ typedef struct{
     char* userFile;
     char* ipAddress;
     int port;
-} User;
+} Fleck;
 
 typedef struct{
     char* fleckIpAddress;
