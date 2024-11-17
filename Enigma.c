@@ -48,14 +48,13 @@ void sendDisconnectionRequest(const char *workerType) {
     }
 }
 
-// Send a response to Fleck (ACK or NACK)
 void sendResponseToFleck(int clientSock, bool isSuccess) {
     Frame responseFrame = {0};
     responseFrame.type = 0x03; // Response to distortion request
     responseFrame.timestamp = time(NULL);
 
     if (isSuccess) {
-        responseFrame.dataLength = 0; // ACK has no data
+        responseFrame.dataLength = 0;
     } else {
         snprintf(responseFrame.data, sizeof(responseFrame.data), "CON_KO");
         responseFrame.dataLength = strlen(responseFrame.data);
@@ -72,7 +71,19 @@ void sendResponseToFleck(int clientSock, bool isSuccess) {
 
 // Handle distortion requests from Fleck
 void handleDistortionRequest(const Frame *receivedFrame, int clientSock) {
-    printf("Processing distortion request from Fleck...\n");
+    char username[128] = {0};
+    char fileName[128] = {0};
+    char fileSize[32] = {0};
+    char md5sum[33] = {0};
+    char factor[32] = {0};
+
+    // Parse the distortion request data
+    if (sscanf(receivedFrame->data, "%127[^&]&%127[^&]&%31[^&]&%32[^&]&%31s",
+               username, fileName, fileSize, md5sum, factor) != 5) {
+        perror("Invalid distortion request data\n");
+        return;
+    }
+
 
     // Simulate a response to Fleck
     Frame responseFrame = {0};
@@ -87,9 +98,11 @@ void handleDistortionRequest(const Frame *receivedFrame, int clientSock) {
     if (write(clientSock, buffer, FRAME_SIZE) < 0) {
         perror("Error sending distortion response to Fleck");
     } else {
-        printf("Distortion process simulated. Sent ACK to Fleck.\n");
+        printf("Distortion process simulated. Sent ACK to %s.\n", username);
+        
     }
 }
+
 
 // Handle incoming connections for distortion requests
 void *enigmaWorkerLoop(void *arg) {
@@ -118,7 +131,7 @@ void *enigmaWorkerLoop(void *arg) {
         return NULL;
     }
 
-    printf("Enigma is listening for distortion requests on port %d...\n", enigmaPort);
+    printF("Waiting for connections...\n");
 
     while (1) {
         struct sockaddr_in clientAddr;
@@ -130,13 +143,16 @@ void *enigmaWorkerLoop(void *arg) {
             continue;
         }
 
-        printf("Accepted connection from %s:%d\n",
+        char *message;
+        asprintf(&message, "Accepted connection from %s:%d\n",
                inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+        printF(message);
+        free(message);
 
         uint8_t buffer[FRAME_SIZE] = {0};
         ssize_t bytesRead = read(clientSock, buffer, FRAME_SIZE);
         if (bytesRead != FRAME_SIZE) {
-            fprintf(stderr, "Invalid frame size received\n");
+            perror("Invalid frame size received\n");
             close(clientSock);
             continue;
         }
@@ -145,7 +161,7 @@ void *enigmaWorkerLoop(void *arg) {
         deserializeFrame(buffer, &receivedFrame);
 
         if (calculateChecksum(&receivedFrame) != receivedFrame.checksum) {
-            fprintf(stderr, "Checksum mismatch\n");
+            perror("Checksum mismatch\n");
             close(clientSock);
             continue;
         }
@@ -153,7 +169,7 @@ void *enigmaWorkerLoop(void *arg) {
         if (receivedFrame.type == 0x03) { // Distortion request
             handleDistortionRequest(&receivedFrame, clientSock);
         } else {
-            fprintf(stderr, "Unexpected frame type received\n");
+            perror("Unexpected frame type received\n");
         }
 
         close(clientSock);
@@ -163,17 +179,19 @@ void *enigmaWorkerLoop(void *arg) {
     return NULL;
 }
 
+
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Error: You need to provide a configuration file\n");
+        printF("Error: You need to provide a configuration file\n");
         return -1;
     }
 
-    printf("Reading configuration file\n");
+    printF("Reading configuration file\n");
     Enigma *enigma = (Enigma *)readConfigFile(argv[1], "Enigma");
 
     if (enigma == NULL) {
-        printf("Error: Could not load Enigma configuration\n");
+        printF("Error: Could not load Enigma configuration\n");
         return -2;
     }
 
@@ -197,7 +215,7 @@ int main(int argc, char *argv[]) {
     }
 
     sendConnectionRequest(enigma->workerType, enigma->fleckIpAddress, enigma->fleckPort);
-    printf("Connected to Gotham as Enigma worker, ready to distort text.\n");
+    printF("Connected to Gotham as Enigma worker, ready to distort text.\n");
 
     pthread_t workerThread;
     pthread_create(&workerThread, NULL, enigmaWorkerLoop, &enigma->fleckPort);
@@ -205,7 +223,7 @@ int main(int argc, char *argv[]) {
     pthread_join(workerThread, NULL);
 
     sendDisconnectionRequest(enigma->workerType);
-    printf("Disconnecting from Gotham.\n");
+    printF("Disconnecting from Gotham.\n");
 
     close(sockfd);
     free(enigma);

@@ -1,11 +1,15 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
+#define _GNU_SOURCE
+#include <unistd.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include "Common.h"
+
 
 #define FRAME_SIZE 256
 

@@ -14,6 +14,8 @@
 #include <dirent.h>
 #include "Protocol.h"
 #include "Common.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 int sockfd = -1; // Socket descriptor for Gotham connection
 pthread_t workerThread; // Worker communication thread
@@ -28,6 +30,8 @@ typedef enum {
     FILE_TYPE_TEXT,
     FILE_TYPE_MEDIA
 } FileType;
+
+Fleck *user;
 
 // Function declarations
 bool isFileOfType(const char *filename, FileType type);
@@ -66,16 +70,24 @@ void listFiles(const char *directory, FileType type) {
     struct dirent *entry;
     const char *typeStr = (type == FILE_TYPE_TEXT) ? "text" : "media";
 
+    char *message;
+
     dir = opendir(directory);
     if (dir == NULL) {
-        printf("Error: Cannot open directory %s\n", directory);
+        asprintf(&message, "Error: Cannot open directory %s\n", directory);
+        printF(message);
+        free(message);
         return;
     }
 
-    printf("Listing %s files:\n", typeStr);
+    asprintf(&message, "Listing %s files:\n", typeStr);
+    printF(message);
+    free(message);
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_REG && isFileOfType(entry->d_name, type)) {
-            printf("- %s\n", entry->d_name);
+            asprintf(&message, "- %s\n", entry->d_name);
+            printF(message);
+            free(message);
         }
     }
     closedir(dir);
@@ -116,10 +128,10 @@ void sendFrame(int socket, const Frame *frame) {
 
     ssize_t bytesWritten = sendAll(socket, buffer, FRAME_SIZE);
     if (bytesWritten != FRAME_SIZE) {
-        fprintf(stderr, "Error: Frame not fully sent (sent %ld bytes, expected %d)\n", bytesWritten, FRAME_SIZE);
-    } else {
-        printf("Frame sent successfully: Type=0x%02x, DataLength=%d, Checksum=0x%04x\n",
-               frame->type, frame->dataLength, frame->checksum);
+        char *message;
+        asprintf(&message, "Error: Frame not fully sent (sent %ld bytes, expected %d)\n", bytesWritten, FRAME_SIZE);
+        printF(message);
+        free(message);
     }
 }
 
@@ -132,8 +144,7 @@ void sendConnectionRequest(const char *username, const char *ip, int port) {
     frame.dataLength = strlen(frame.data);
     frame.checksum = calculateChecksum(&frame);
 
-    printf("Sending connection request: Type=0x%02x, DataLength=%d, Data=%s, Checksum=0x%04x\n",
-           frame.type, frame.dataLength, frame.data, frame.checksum);
+    
 
     sendFrame(sockfd, &frame);
 }
@@ -144,7 +155,7 @@ void handleServerResponse() {
     ssize_t bytesRead = read(sockfd, buffer, FRAME_SIZE);
 
     if (bytesRead != FRAME_SIZE) {
-        fprintf(stderr, "Error: Invalid response frame size received\n");
+        perror("Error: Invalid response frame size received\n");
         return;
     }
 
@@ -152,11 +163,14 @@ void handleServerResponse() {
     deserializeFrame(buffer, &response);
 
     if (response.type == 0x01 && response.dataLength == 0) {
-        printf("Connected to Gotham.\n");
+        printF("Connected to Gotham.\n");
     } else if (response.type == 0x01) {
-        printf("Connection failed: %s\n", response.data);
+        char *message;
+        asprintf(&message, "Connection failed: %s\n", response.data);
+        printF(message);
+        free(message);
     } else {
-        printf("Unexpected frame type received during connection.\n");
+        printF("Unexpected frame type received during connection.\n");
     }
 }
 
@@ -170,8 +184,7 @@ void sendLogoutRequest(const char *username) {
     frame.dataLength = strlen(frame.data);
     frame.checksum = calculateChecksum(&frame);
 
-    printf("Sending logout request: Type=0x%02x, DataLength=%d, Data=%s, Checksum=0x%04x\n",
-           frame.type, frame.dataLength, frame.data, frame.checksum);
+    
 
     sendFrame(sockfd, &frame);
 }
@@ -199,14 +212,16 @@ void *workerCommunication(void *arg) {
         return NULL;
     }
 
-    printf("Connected to worker at %s:%d.\n", workerInfo->workerIp, workerInfo->workerPort);
+    char *message;
+    asprintf(&message, "Connected to worker at %s:%d.\n", workerInfo->workerIp, workerInfo->workerPort);
+    printF(message);
+    free(message);
 
     // Prepare TYPE: 0x03 frame with file metadata
     Frame fileRequestFrame = {0};
     fileRequestFrame.type = 0x03; // Worker connection with file metadata
     fileRequestFrame.timestamp = time(NULL);
-    snprintf(fileRequestFrame.data, sizeof(fileRequestFrame.data), "%s&hello.txt&1024&<MD5SUM>&<factor>",
-             "Arthur"); // Example data
+    snprintf(fileRequestFrame.data, sizeof(fileRequestFrame.data), "%s&hello.txt&1024&<MD5SUM>&<factor>",user->name); // Example data
     fileRequestFrame.dataLength = strlen(fileRequestFrame.data);
     fileRequestFrame.checksum = calculateChecksum(&fileRequestFrame);
 
@@ -216,7 +231,9 @@ void *workerCommunication(void *arg) {
     if (write(workerSock, buffer, FRAME_SIZE) < 0) {
         perror("Error sending file request to worker");
     } else {
-        printf("File request sent to worker: Type=0x03, Data=%s\n", fileRequestFrame.data);
+        asprintf(&message, "File request sent to worker: Type=0x03, Data=%s\n", fileRequestFrame.data);
+        printF(message);
+        free(message);
     }
 
     // Wait for worker's response
@@ -225,14 +242,18 @@ void *workerCommunication(void *arg) {
         deserializeFrame(buffer, &response);
 
         if (response.type == 0x03 && response.dataLength == 0) {
-            printf("Worker accepted the connection. Start file distortion.\n");
+            printF("Worker accepted the connection. Start file distortion.\n");
         } else if (response.type == 0x03) {
-            printf("Worker rejected the connection: %s\n", response.data);
+            asprintf(&message, "Worker rejected the connection: %s\n", response.data);
+            printF(message);
+            free(message);
         } else {
-            printf("Unexpected response from worker: Type=0x%02x\n", response.type);
+            asprintf(&message, "Unexpected response from worker: Type=0x%02x\n", response.type);
+            printF(message);
+            free(message);
         }
     } else {
-        printf("Worker did not respond.\n");
+        printF("Worker did not respond.\n");
     }
 
     close(workerSock);
@@ -250,9 +271,6 @@ void sendDistortionRequest(const char *mediaType, const char *fileName) {
     frame.dataLength = strlen(frame.data);
     frame.checksum = calculateChecksum(&frame);
 
-    printf("Sending distortion request: Type=0x%02x, DataLength=%d, Data=%s, Checksum=0x%04x\n",
-           frame.type, frame.dataLength, frame.data, frame.checksum);
-
     sendFrame(sockfd, &frame);
 }
 
@@ -262,7 +280,10 @@ void handleDistortionResponse() {
     ssize_t bytesRead = readAll(sockfd, buffer, FRAME_SIZE);
 
     if (bytesRead != FRAME_SIZE) {
-        fprintf(stderr, "Error: Invalid response frame size received (%ld bytes)\n", bytesRead);
+        char *message;
+        asprintf(&message, "Error: Invalid response frame size received (%ld bytes)\n", bytesRead);
+        printF(message);
+        free(message);
         return;
     }
 
@@ -270,15 +291,15 @@ void handleDistortionResponse() {
     deserializeFrame(buffer, &response);
 
     if (response.type != 0x10) {
-        printf("Unexpected frame type received.\n");
+        printF("Unexpected frame type received.\n");
         return;
     }
 
     if (response.dataLength == 0 || strcmp(response.data, "DISTORT_KO") == 0) {
-        printf("No workers available for this distortion type.\n");
+        printF("No workers available for this distortion type.\n");
         return;
     } else if (strcmp(response.data, "MEDIA_KO") == 0) {
-        printf("Invalid media type for distortion.\n");
+        printF("Invalid media type for distortion.\n");
         return;
     }
 
@@ -289,12 +310,10 @@ void handleDistortionResponse() {
     }
 
     if (sscanf(response.data, "%127[^&]&%d", workerInfo->workerIp, &workerInfo->workerPort) != 2) {
-        printf("Invalid worker redirection data from Gotham.\n");
+        printF("Invalid worker redirection data from Gotham.\n");
         free(workerInfo);
         return;
     }
-
-    printf("Redirecting to worker at %s:%d\n", workerInfo->workerIp, workerInfo->workerPort);
 
     if (pthread_create(&workerThread, NULL, workerCommunication, workerInfo) != 0) {
         perror("Failed to create worker thread");
@@ -343,7 +362,7 @@ void handleCommands(Fleck *user) {
                     handleServerResponse();
                 }
             } else {
-                printf("Already connected to Gotham.\n");
+                printF("Already connected to Gotham.\n");
             }
             
         } else if (strcasecmp(command, "LOGOUT") == 0) {
@@ -352,25 +371,58 @@ void handleCommands(Fleck *user) {
                 close(sockfd);
                 sockfd = -1;
             }
-        } else if (strncasecmp(command, "DISTORT", 7) == 0) {
+        }else if (strncasecmp(command, "DISTORT ", 8) == 0) { // Ensure exact case-sensitive match
             if (sockfd != -1) {
-                char mediaType[16], fileName[128];
-                printf("Enter media type (Text/Media): ");
-                scanf("%15s", mediaType);
-                printf("Enter file name: ");
-                scanf("%127s", fileName);
+                char *fileName = NULL;
+                char *factor = NULL;
+
+                char *args = command + 8;
+
+                char *spacePos = strchr(args, ' ');
+                if (spacePos != NULL) {
+                    *spacePos = '\0'; // Split into two strings
+                    fileName = args;  // File name is before the space
+                    factor = spacePos + 1; // Factor is after the space
+                }
+
+                if (fileName == NULL || factor == NULL || strlen(fileName) == 0 || strlen(factor) == 0) {
+                    printF("Usage: DISTORT <file.xxx> <factor>\n");
+                    free(command);
+                    continue;
+                }
+
+                const char *ext = strrchr(fileName, '.');
+                char mediaType[16] = {0};
+                if (ext != NULL) {
+                    if (strcasecmp(ext, ".txt") == 0) {
+                        strcpy(mediaType, "Text");
+                    } else if (strcasecmp(ext, ".wav") == 0 || strcasecmp(ext, ".mp3") == 0 ||
+                            strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0 ||
+                            strcasecmp(ext, ".png") == 0) {
+                        strcpy(mediaType, "Media");
+                    } else {
+                        printF("Unsupported file type\n");
+                        free(command);
+                        continue;
+                    }
+                } else {
+                    printF("Invalid file name, missing extension)\n");
+                    free(command);
+                    continue;
+                }
+
+                // Construct and send the distortion request
                 sendDistortionRequest(mediaType, fileName);
                 handleDistortionResponse();
             } else {
                 printf("You must connect to Gotham first.\n");
             }
-            
         } else if (strcasecmp(command, "LIST MEDIA") == 0) {
             listFiles(user->userFile, FILE_TYPE_MEDIA);
         } else if (strcasecmp(command, "LIST TEXT") == 0) {
             listFiles(user->userFile, FILE_TYPE_TEXT);
         } else {
-            printf("Unknown command.\n");
+            printF("Unknown command.\n");
         }
 
         free(command);
@@ -379,11 +431,11 @@ void handleCommands(Fleck *user) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Error: You need to provide a configuration file\n");
+        perror("Error: You need to provide a configuration file\n");
         return -1;
     }
 
-    Fleck *user = (Fleck *)readConfigFile(argv[1], "Fleck");
+    user = (Fleck *)readConfigFile(argv[1], "Fleck");
     if (user != NULL) {
         char *message;
         asprintf(&message, "%s user initialized\n", user->name);

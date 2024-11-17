@@ -23,8 +23,17 @@ typedef struct {
     int isAvailable; // 1 if active
 } Worker;
 
+typedef struct {
+    char username[128];
+    char ip[128];
+} FleckConnection;
+
 Worker mediaWorker = {0};
 Worker textWorker = {0};
+
+FleckConnection fleckConnection = {0};
+
+pthread_mutex_t fleckMutex = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_mutex_t workerMutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -70,12 +79,15 @@ void handleWorkerConnection(const Frame *receivedFrame, int clientSock) {
     int port;
 
     if (sscanf(receivedFrame->data, "%15[^&]&%127[^&]&%d", workerType, ip, &port) != 3) {
-        fprintf(stderr, "Invalid worker connection request data\n");
+        perror("Invalid worker connection request data\n");
         sendErrorFrame(clientSock);
         return;
     }
 
-    printf("New %s worker connected – ready to distort!\n", workerType);
+    char *message;
+    asprintf(&message, "New %s worker connected – ready to distort!\n", workerType);
+    printF(message);
+    free(message);
 
     pthread_mutex_lock(&workerMutex);
 
@@ -109,10 +121,15 @@ void handleFleckRequest(const Frame *receivedFrame, int clientSock) {
     char mediaType[16] = {0};
     char fileName[128] = {0};
 
-    printf("Handling distortion request: Data=%s\n", receivedFrame->data);
+    pthread_mutex_lock(&fleckMutex);
+    char *message;
+    asprintf(&message, "%s has sent a %s distortion petition – ", fleckConnection.username, mediaType);
+    printF(message);
+    pthread_mutex_unlock(&fleckMutex);
+    free(message);
 
     if (sscanf(receivedFrame->data, "%15[^&]&%127s", mediaType, fileName) != 2) {
-        fprintf(stderr, "Failed to parse distortion request data\n");
+        perror("Failed to parse distortion request data\n");
         Frame responseFrame = {0};
         responseFrame.type = 0x10;
         responseFrame.timestamp = time(NULL);
@@ -162,7 +179,10 @@ void handleFleckRequest(const Frame *receivedFrame, int clientSock) {
     serializeFrame(&responseFrame, responseBuffer);
     write(clientSock, responseBuffer, FRAME_SIZE);
 
-    printf("Distortion response sent: %s\n", responseFrame.data);
+    
+    asprintf(&message,"Distortion response sent: %s\n", responseFrame.data);
+    printF(message);
+    free(message);
 }
 
 // Handle Fleck connection (TYPE: 0x01)
@@ -171,7 +191,7 @@ void handleFleckConnection(const Frame *receivedFrame, int clientSock) {
     int port;
 
     if (sscanf(receivedFrame->data, "%127[^&]&%127[^&]&%d", username, ip, &port) != 3) {
-        fprintf(stderr, "Invalid Fleck connection data\n");
+        perror("Invalid Fleck connection data\n");
         Frame responseFrame = {0};
         responseFrame.type = 0x01;
         responseFrame.timestamp = time(NULL);
@@ -185,7 +205,15 @@ void handleFleckConnection(const Frame *receivedFrame, int clientSock) {
         return;
     }
 
-    printf("New user connected: %s (IP: %s, Port: %d)\n", username, ip, port);
+    char *message;
+    asprintf(&message, "New user connected: %s.\n", username);
+    printF(message);
+    free(message);
+
+    pthread_mutex_lock(&fleckMutex);
+    strncpy(fleckConnection.username, username, sizeof(fleckConnection.username) - 1);
+    strncpy(fleckConnection.ip, ip, sizeof(fleckConnection.ip) - 1);
+    pthread_mutex_unlock(&fleckMutex);
 
     Frame responseFrame = {0};
     responseFrame.type = 0x01; // Connection acknowledgment
@@ -211,10 +239,15 @@ void handleClientFrame(const Frame *receivedFrame, int clientSock) {
             handleWorkerConnection(receivedFrame, clientSock);
             break;
         case 0x07: // Disconnection
-            printf("Client disconnected: %s\n", receivedFrame->data);
+            char *message;
+            asprintf(&message, "Client disconnected: %s\n", receivedFrame->data);
+            printF(message);
+            free(message);
             break;
         default:
-            fprintf(stderr, "Unknown frame type received: 0x%02x\n", receivedFrame->type);
+            asprintf(&message, "Unknown frame type received: 0x%02x\n", receivedFrame->type);
+            printF(message);
+            free(message);
             sendErrorFrame(clientSock);
     }
 }
@@ -228,14 +261,14 @@ void *handleClient(void *arg) {
     while (1) {
         ssize_t bytesRead = readAll(clientSock, buffer, FRAME_SIZE);
         if (bytesRead <= 0) {
-            printf("Client disconnected.\n");
+            printF("Client disconnected.\n");
             break;
         }
 
         Frame receivedFrame;
         deserializeFrame(buffer, &receivedFrame);
         if (calculateChecksum(&receivedFrame) != receivedFrame.checksum) {
-            fprintf(stderr, "Checksum mismatch\n");
+            perror("Checksum mismatch\n");
             sendErrorFrame(clientSock);
             continue;
         }
@@ -262,11 +295,6 @@ void *serverThread(void *arg) {
             continue;
         }
 
-        printf("[%s] New connection accepted from %s:%d\n",
-               context->serverType,
-               inet_ntoa(clientAddr.sin_addr),
-               ntohs(clientAddr.sin_port));
-
         pthread_t threadId;
         pthread_create(&threadId, NULL, handleClient, clientSock);
         pthread_detach(threadId);
@@ -277,7 +305,7 @@ void *serverThread(void *arg) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Error: You need to provide a configuration file\n");
+        printF("Error: You need to provide a configuration file\n");
         return -1;
     }
 
@@ -286,12 +314,11 @@ int main(int argc, char *argv[]) {
     Gotham *gotham = (Gotham *)readConfigFile(argv[1], "Gotham");
 
     if (gotham == NULL) {
-        printf("Error: Could not load Gotham configuration\n");
+        printF("Error: Could not load Gotham configuration\n");
         return -2;
     }
 
-    printf("Configuration loaded: Fleck Port=%d, Worker Port=%d\n", gotham->fleckPort, gotham->harleyEnigmaPort);
-
+    
     // Create Fleck server socket
     int fleckSock = socket(AF_INET, SOCK_STREAM, 0);
     if (fleckSock < 0) {
@@ -318,8 +345,7 @@ int main(int argc, char *argv[]) {
         free(gotham);
         return -5;
     }
-    printf("Fleck server listening...\n");
-
+    
     // Create Enigma/Harley server socket
     int workerSock = socket(AF_INET, SOCK_STREAM, 0);
     if (workerSock < 0) {
@@ -349,7 +375,8 @@ int main(int argc, char *argv[]) {
         free(gotham);
         return -8;
     }
-    printf("Worker server listening...\n");
+    printF("Gotham server initialized\n");
+    printF("Waiting for connections...\n");
 
     // Start threads for Fleck and Enigma/Harley
     ServerContext fleckContext = {fleckSock, "Fleck"};
