@@ -9,6 +9,8 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include <pthread.h>
 #include "Protocol.h"
 #include "Common.h"
 
@@ -23,15 +25,31 @@ void sendConnectionRequest(const char *workerType, const char *ip, int port) {
     frame.dataLength = strlen(frame.data);
     frame.checksum = calculateChecksum(&frame);
 
-    uint8_t buffer[FRAME_SIZE];
+    uint8_t buffer[FRAME_SIZE] = {0};
     serializeFrame(&frame, buffer);
     if (write(sockfd, buffer, FRAME_SIZE) < 0) {
         perror("Error sending connection request to Gotham");
     }
 }
 
+// Send a disconnection request to Gotham
+void sendDisconnectionRequest(const char *workerType) {
+    Frame frame = {0};
+    frame.type = 0x07; // Disconnection frame
+    frame.timestamp = time(NULL);
+    snprintf(frame.data, sizeof(frame.data), "%s", workerType);
+    frame.dataLength = strlen(frame.data);
+    frame.checksum = calculateChecksum(&frame);
+
+    uint8_t buffer[FRAME_SIZE] = {0};
+    serializeFrame(&frame, buffer);
+    if (write(sockfd, buffer, FRAME_SIZE) < 0) {
+        perror("Error sending disconnection request to Gotham");
+    }
+}
+
 // Send a response to Fleck (ACK or NACK)
-void sendResponseToFleck(int clientSock, int isSuccess) {
+void sendResponseToFleck(int clientSock, bool isSuccess) {
     Frame responseFrame = {0};
     responseFrame.type = 0x03; // Response to distortion request
     responseFrame.timestamp = time(NULL);
@@ -45,13 +63,14 @@ void sendResponseToFleck(int clientSock, int isSuccess) {
 
     responseFrame.checksum = calculateChecksum(&responseFrame);
 
-    uint8_t buffer[FRAME_SIZE];
+    uint8_t buffer[FRAME_SIZE] = {0};
     serializeFrame(&responseFrame, buffer);
     if (write(clientSock, buffer, FRAME_SIZE) < 0) {
         perror("Error sending response to Fleck");
     }
 }
 
+// Handle distortion requests from Fleck
 void handleDistortionRequest(const Frame *receivedFrame, int clientSock) {
     printf("Processing distortion request from Fleck...\n");
 
@@ -62,40 +81,24 @@ void handleDistortionRequest(const Frame *receivedFrame, int clientSock) {
     responseFrame.dataLength = 0; // No additional data
     responseFrame.checksum = calculateChecksum(&responseFrame);
 
-    uint8_t buffer[FRAME_SIZE];
-    memset(buffer, 0, FRAME_SIZE); // Ensure buffer is zeroed
+    uint8_t buffer[FRAME_SIZE] = {0};
     serializeFrame(&responseFrame, buffer);
 
-    ssize_t bytesWritten = write(clientSock, buffer, FRAME_SIZE);
-    if (bytesWritten != FRAME_SIZE) {
+    if (write(clientSock, buffer, FRAME_SIZE) < 0) {
         perror("Error sending distortion response to Fleck");
-    }
-    printf("Distortion process simulated. Sent ACK to Fleck.\n");
-}
-
-
-// Send a disconnection request to Gotham
-void sendDisconnectionRequest(const char *workerType) {
-    Frame frame = {0};
-    frame.type = 0x07; // Disconnection frame
-    frame.timestamp = time(NULL);
-    snprintf(frame.data, sizeof(frame.data), "%s", workerType);
-    frame.dataLength = strlen(frame.data);
-    frame.checksum = calculateChecksum(&frame);
-
-    uint8_t buffer[FRAME_SIZE];
-    serializeFrame(&frame, buffer);
-    if (write(sockfd, buffer, FRAME_SIZE) < 0) {
-        perror("Error sending disconnection request to Gotham");
+    } else {
+        printf("Distortion process simulated. Sent ACK to Fleck.\n");
     }
 }
 
-// Enigma's loop for handling distortion requests
-void enigmaLoop(int enigmaPort) {
+// Handle incoming connections for distortion requests
+void *enigmaWorkerLoop(void *arg) {
+    int enigmaPort = *(int *)arg;
+
     int serverSock = socket(AF_INET, SOCK_STREAM, 0);
     if (serverSock < 0) {
         perror("Socket creation failed for Enigma");
-        return;
+        return NULL;
     }
 
     struct sockaddr_in serverAddr = {0};
@@ -106,13 +109,13 @@ void enigmaLoop(int enigmaPort) {
     if (bind(serverSock, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) < 0) {
         perror("Bind failed for Enigma");
         close(serverSock);
-        return;
+        return NULL;
     }
 
     if (listen(serverSock, 5) < 0) {
         perror("Listen failed for Enigma");
         close(serverSock);
-        return;
+        return NULL;
     }
 
     printf("Enigma is listening for distortion requests on port %d...\n", enigmaPort);
@@ -130,7 +133,7 @@ void enigmaLoop(int enigmaPort) {
         printf("Accepted connection from %s:%d\n",
                inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
 
-        uint8_t buffer[FRAME_SIZE];
+        uint8_t buffer[FRAME_SIZE] = {0};
         ssize_t bytesRead = read(clientSock, buffer, FRAME_SIZE);
         if (bytesRead != FRAME_SIZE) {
             fprintf(stderr, "Invalid frame size received\n");
@@ -138,7 +141,7 @@ void enigmaLoop(int enigmaPort) {
             continue;
         }
 
-        Frame receivedFrame;
+        Frame receivedFrame = {0};
         deserializeFrame(buffer, &receivedFrame);
 
         if (calculateChecksum(&receivedFrame) != receivedFrame.checksum) {
@@ -157,9 +160,9 @@ void enigmaLoop(int enigmaPort) {
     }
 
     close(serverSock);
+    return NULL;
 }
 
-// Main function
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         printf("Error: You need to provide a configuration file\n");
@@ -193,13 +196,14 @@ int main(int argc, char *argv[]) {
         return -4;
     }
 
-    sendConnectionRequest(enigma->workerType, enigma->gothamIpAddress, enigma->gothamPort);
+    sendConnectionRequest(enigma->workerType, enigma->fleckIpAddress, enigma->fleckPort);
     printf("Connected to Gotham as Enigma worker, ready to distort text.\n");
 
-    // Start the loop for handling distortion requests
-    enigmaLoop(enigma->fleckPort);
+    pthread_t workerThread;
+    pthread_create(&workerThread, NULL, enigmaWorkerLoop, &enigma->fleckPort);
 
-    // On exit or termination
+    pthread_join(workerThread, NULL);
+
     sendDisconnectionRequest(enigma->workerType);
     printf("Disconnecting from Gotham.\n");
 

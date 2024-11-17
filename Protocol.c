@@ -2,44 +2,63 @@
 
 // Calculate checksum for a frame
 uint16_t calculateChecksum(const Frame *frame) {
-    uint32_t sum = frame->type;
-    sum += frame->dataLength & 0xFF;
-    sum += (frame->dataLength >> 8) & 0xFF;
+    uint16_t checksum = 0;
+    uint8_t buffer[FRAME_SIZE] = {0};
 
-    for (int i = 0; i < frame->dataLength; i++) {
-        sum += (uint8_t)frame->data[i];
+    // Serialize the frame into a temporary buffer
+    serializeFrame(frame, buffer);
+
+    // Calculate the checksum over all bytes except the checksum fields
+    for (int i = 0; i < FRAME_SIZE - 6; i++) {
+        checksum += buffer[i];
     }
 
-    sum += frame->timestamp & 0xFF;
-    sum += (frame->timestamp >> 8) & 0xFF;
-    sum += (frame->timestamp >> 16) & 0xFF;
-    sum += (frame->timestamp >> 24) & 0xFF;
-
-    return sum % 65536;
+    return checksum % 65536; // Modulo 2^16
 }
 
+// void serializeFrame(const Frame *frame, uint8_t *buffer) {
+//     memset(buffer, 0, FRAME_SIZE); // Ensure buffer is zeroed for padding
+
+//     // Write frame type
+//     buffer[0] = frame->type;
+
+//     // Write data length (2 bytes, little-endian)
+//     buffer[1] = frame->dataLength & 0xFF;
+//     buffer[2] = (frame->dataLength >> 8) & 0xFF;
+
+//     // Copy data (up to frame->dataLength)
+//     if (frame->dataLength > 0 && frame->dataLength <= sizeof(frame->data)) {
+//         memcpy(buffer + 3, frame->data, frame->dataLength);
+//     }
+
+//     // Write checksum (2 bytes, little-endian)
+//     buffer[FRAME_SIZE - 6] = frame->checksum & 0xFF;
+//     buffer[FRAME_SIZE - 5] = (frame->checksum >> 8) & 0xFF;
+
+//     // Write timestamp (4 bytes, little-endian)
+//     memcpy(buffer + FRAME_SIZE - 4, &frame->timestamp, sizeof(int32_t));
+// }
+
 void serializeFrame(const Frame *frame, uint8_t *buffer) {
-    memset(buffer, 0, FRAME_SIZE); // Ensure buffer is zeroed for padding
+    memset(buffer, 0, FRAME_SIZE); // Ensure the entire buffer is zeroed out
 
-    // Write frame type
-    buffer[0] = frame->type;
+    buffer[0] = frame->type; // Frame type
+    buffer[1] = frame->dataLength & 0xFF; // Data length (low byte)
+    buffer[2] = (frame->dataLength >> 8) & 0xFF; // Data length (high byte)
 
-    // Write data length (2 bytes, little-endian)
-    buffer[1] = frame->dataLength & 0xFF;
-    buffer[2] = (frame->dataLength >> 8) & 0xFF;
-
-    // Copy data (up to frame->dataLength)
-    if (frame->dataLength > 0 && frame->dataLength <= sizeof(frame->data)) {
+    // Copy data into buffer
+    if (frame->dataLength > 0) {
         memcpy(buffer + 3, frame->data, frame->dataLength);
     }
 
-    // Write checksum (2 bytes, little-endian)
+    // Add checksum
     buffer[FRAME_SIZE - 6] = frame->checksum & 0xFF;
     buffer[FRAME_SIZE - 5] = (frame->checksum >> 8) & 0xFF;
 
-    // Write timestamp (4 bytes, little-endian)
+    // Add timestamp
     memcpy(buffer + FRAME_SIZE - 4, &frame->timestamp, sizeof(int32_t));
 }
+
 
 
 void deserializeFrame(const uint8_t *buffer, Frame *frame) {
